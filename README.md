@@ -1,4 +1,4 @@
-# Sparrow Bitcoin Wallet
+# Sparrow LBC Wallet
 
 Sparrow is a modern desktop Bitcoin wallet application supporting most hardware wallets and built on common standards such as PSBT, with an emphasis on transparency and usability.
 
