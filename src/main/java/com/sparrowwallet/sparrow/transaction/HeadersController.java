@@ -30,14 +30,18 @@ import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.Node;
 import javafx.scene.control.*;
+import javafx.scene.control.DateCell;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.util.Duration;
+import javafx.util.StringConverter;
 import org.controlsfx.glyphfont.Glyph;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +56,7 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.time.*;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -60,6 +65,9 @@ public class HeadersController extends TransactionFormController implements Init
     public static final String LOCKTIME_DATE_FORMAT = "yyyy-MM-dd HH:mm:ss";
     public static final String BLOCK_TIMESTAMP_DATE_FORMAT = "yyyy-MM-dd HH:mm:ss ZZZ";
     public static final String UNFINALIZED_TXID_CLASS = "unfinalized-txid";
+
+    public static final String MAX_LOCKTIME_DATE = "2106-02-07T06:28:15Z";
+    public static final String MIN_LOCKTIME_DATE = "1985-11-05T00:53:20Z";
 
     private HeadersForm headersForm;
 
@@ -209,6 +217,8 @@ public class HeadersController extends TransactionFormController implements Init
 
     private ElectrumServer.TransactionMempoolService transactionMempoolService;
 
+    private final Map<Integer, String> outputIndexLabels = new HashMap<>();
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         EventManager.get().register(this);
@@ -318,12 +328,61 @@ public class HeadersController extends TransactionFormController implements Init
             }
         });
 
+        LocalDateTime maxLocktimeDate = Instant.parse(MAX_LOCKTIME_DATE).atZone(ZoneId.systemDefault()).toLocalDateTime();
+        LocalDateTime minLocktimeDate = Instant.parse(MIN_LOCKTIME_DATE).atZone(ZoneId.systemDefault()).toLocalDateTime();
+        locktimeDate.setDayCellFactory(d ->
+                new DateCell() {
+                    @Override
+                    public void updateItem(LocalDate item, boolean empty) {
+                        super.updateItem(item, empty);
+                        setDisable(item.isAfter(maxLocktimeDate.toLocalDate()) || item.isBefore(minLocktimeDate.toLocalDate()));
+                    }
+                });
+
         locktimeDate.setFormat(LOCKTIME_DATE_FORMAT);
         locktimeDate.dateTimeValueProperty().addListener((obs, oldValue, newValue) -> {
+            int caret = locktimeDate.getEditor().getCaretPosition();
+            locktimeDate.getEditor().setText(newValue.format(DateTimeFormatter.ofPattern(locktimeDate.getFormat())));
+            locktimeDate.getEditor().positionCaret(caret);
             tx.setLocktime(newValue.toEpochSecond(OffsetDateTime.now(ZoneId.systemDefault()).getOffset()));
             futureDateWarning.setVisible(newValue.isAfter(LocalDateTime.now()));
             if(oldValue != null) {
                 EventManager.get().post(new TransactionChangedEvent(tx));
+            }
+        });
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(LOCKTIME_DATE_FORMAT);
+        locktimeDate.setConverter(new StringConverter<LocalDate>() {
+            public String toString(LocalDate object) {
+                LocalDateTime value = locktimeDate.getDateTimeValue();
+                return (value != null) ? value.format(formatter) : "";
+            }
+
+            public LocalDate fromString(String value) {
+                if(value == null) {
+                    locktimeDate.setDateTimeValue(null);
+                    return null;
+                }
+
+                LocalDateTime localDateTime = LocalDateTime.parse(value, formatter);
+                if(localDateTime.isAfter(maxLocktimeDate) || localDateTime.isBefore(minLocktimeDate)) {
+                    throw new IllegalArgumentException("Invalid locktime date");
+                }
+                locktimeDate.setDateTimeValue(localDateTime);
+                return locktimeDate.getDateTimeValue().toLocalDate();
+            }
+        });
+
+        locktimeDate.getEditor().textProperty().addListener((observable, oldValue, newValue) -> {
+            String controlValue = locktimeDate.getDateTimeValue().format(DateTimeFormatter.ofPattern(locktimeDate.getFormat()));
+            if(!controlValue.equals(newValue) && !locktimeDate.getStyleClass().contains("edited")) {
+                locktimeDate.getStyleClass().add("edited");
+            }
+        });
+
+        locktimeDate.addEventFilter(KeyEvent.ANY, event -> {
+            if(event.getCode() == KeyCode.ENTER) {
+                locktimeDate.getStyleClass().remove("edited");
             }
         });
 
@@ -344,6 +403,11 @@ public class HeadersController extends TransactionFormController implements Init
             feeAmt = 0L;
         } else if(headersForm.getInputTransactions() != null) {
             feeAmt = calculateFee(headersForm.getInputTransactions());
+        } else {
+            Wallet wallet = getWalletFromTransactionInputs();
+            if(wallet != null) {
+                feeAmt = calculateFee(wallet.getTransactions());
+            }
         }
 
         if(feeAmt != null) {
@@ -464,7 +528,7 @@ public class HeadersController extends TransactionFormController implements Init
             }
 
             BlockTransaction inputTx = inputTransactions.get(input.getOutpoint().getHash());
-            if(inputTx == null) {
+            if(inputTx == null && headersForm.getInputTransactions() != null) {
                 inputTx = headersForm.getInputTransactions().get(input.getOutpoint().getHash());
             }
 
@@ -498,11 +562,18 @@ public class HeadersController extends TransactionFormController implements Init
         Wallet wallet = getWalletFromTransactionInputs();
 
         if(wallet != null) {
+            Map<Sha256Hash, BlockTransaction> walletInputTransactions = inputTransactions;
+            if(walletInputTransactions == null) {
+                Set<Sha256Hash> refs = headersForm.getTransaction().getInputs().stream().map(txInput -> txInput.getOutpoint().getHash()).collect(Collectors.toSet());
+                walletInputTransactions = new HashMap<>(wallet.getTransactions());
+                walletInputTransactions.keySet().retainAll(refs);
+            }
+
             Map<BlockTransactionHashIndex, WalletNode> selectedTxos = new LinkedHashMap<>();
             Map<BlockTransactionHashIndex, WalletNode> walletTxos = wallet.getWalletTxos();
             for(TransactionInput txInput : headersForm.getTransaction().getInputs()) {
                 BlockTransactionHashIndex selectedTxo = walletTxos.keySet().stream().filter(txo -> txInput.getOutpoint().getHash().equals(txo.getHash()) && txInput.getOutpoint().getIndex() == txo.getIndex())
-                        .findFirst().orElse(new BlockTransactionHashIndex(txInput.getOutpoint().getHash(), 0, null, null, txInput.getOutpoint().getIndex(), 0));
+                        .findFirst().orElse(getBlockTransactionInput(walletInputTransactions, txInput));
                 selectedTxos.put(selectedTxo, walletTxos.get(selectedTxo));
             }
 
@@ -513,10 +584,10 @@ public class HeadersController extends TransactionFormController implements Init
                 WalletNode changeNode = changeOutputScripts.get(txOutput.getScript());
                 if(changeNode != null) {
                     if(headersForm.getTransaction().getOutputs().size() == 4 && headersForm.getTransaction().getOutputs().stream().anyMatch(txo -> txo != txOutput && txo.getValue() == txOutput.getValue())) {
-                        try {
-                            payments.add(new Payment(txOutput.getScript().getToAddresses()[0], ".." + changeNode + " (Fake Mix)", txOutput.getValue(), false, Payment.Type.FAKE_MIX));
-                        } catch(Exception e) {
-                            //ignore
+                        if(selectedTxos.values().stream().allMatch(Objects::nonNull)) {
+                            payments.add(new Payment(txOutput.getScript().getToAddress(), ".." + changeNode + " (Fake Mix)", txOutput.getValue(), false, Payment.Type.FAKE_MIX));
+                        } else {
+                            payments.add(new Payment(txOutput.getScript().getToAddress(), ".." + changeNode + " (Mix)", txOutput.getValue(), false, Payment.Type.MIX));
                         }
                     } else {
                         changeMap.put(changeNode, txOutput.getValue());
@@ -532,26 +603,26 @@ public class HeadersController extends TransactionFormController implements Init
                     BlockTransactionHashIndex receivedTxo = walletTxos.keySet().stream().filter(txo -> txo.getHash().equals(txOutput.getHash()) && txo.getIndex() == txOutput.getIndex()).findFirst().orElse(null);
                     String label = headersForm.getName() == null || (headersForm.getName().startsWith("[") && headersForm.getName().endsWith("]") && headersForm.getName().length() == 8) ? null : headersForm.getName();
                     try {
-                        payments.add(new Payment(txOutput.getScript().getToAddresses()[0], receivedTxo != null ? receivedTxo.getLabel() : label, txOutput.getValue(), false, paymentType));
+                        Payment payment = new Payment(txOutput.getScript().getToAddresses()[0], receivedTxo != null ? receivedTxo.getLabel() : label, txOutput.getValue(), false, paymentType);
+                        WalletTransaction createdTx = AppServices.get().getCreatedTransaction(selectedTxos.keySet());
+                        if(createdTx != null) {
+                            Optional<String> optLabel = createdTx.getPayments().stream().filter(pymt -> pymt.getAddress().equals(payment.getAddress()) && pymt.getAmount() == payment.getAmount()).map(Payment::getLabel).findFirst();
+                            if(optLabel.isPresent()) {
+                                payment.setLabel(optLabel.get());
+                                outputIndexLabels.put(txOutput.getIndex(), optLabel.get());
+                            }
+                        }
+                        payments.add(payment);
                     } catch(Exception e) {
                         //ignore
                     }
                 }
             }
 
-            return new WalletTransaction(wallet, headersForm.getTransaction(), Collections.emptyList(), selectedTxos, payments, changeMap, fee.getValue(), inputTransactions);
+            return new WalletTransaction(wallet, headersForm.getTransaction(), Collections.emptyList(), List.of(selectedTxos), payments, changeMap, fee.getValue(), walletInputTransactions);
         } else {
             Map<BlockTransactionHashIndex, WalletNode> selectedTxos = headersForm.getTransaction().getInputs().stream()
-                    .collect(Collectors.toMap(txInput -> {
-                                if(inputTransactions != null) {
-                                    BlockTransaction blockTransaction = inputTransactions.get(txInput.getOutpoint().getHash());
-                                    if(blockTransaction != null) {
-                                        TransactionOutput txOutput = blockTransaction.getTransaction().getOutputs().get((int)txInput.getOutpoint().getIndex());
-                                        return new BlockTransactionHashIndex(blockTransaction.getHash(), blockTransaction.getHeight(), blockTransaction.getDate(), blockTransaction.getFee(), txInput.getOutpoint().getIndex(), txOutput.getValue());
-                                    }
-                                }
-                                return new BlockTransactionHashIndex(txInput.getOutpoint().getHash(), 0, null, null, txInput.getOutpoint().getIndex(), 0);
-                            },
+                    .collect(Collectors.toMap(txInput -> getBlockTransactionInput(inputTransactions, txInput),
                             txInput -> new WalletNode("m/0"),
                             (u, v) -> { throw new IllegalStateException("Duplicate TXOs"); },
                             LinkedHashMap::new));
@@ -566,8 +637,20 @@ public class HeadersController extends TransactionFormController implements Init
                 }
             }
 
-            return new WalletTransaction(null, headersForm.getTransaction(), Collections.emptyList(), selectedTxos, payments, Collections.emptyMap(), fee.getValue(), inputTransactions);
+            return new WalletTransaction(null, headersForm.getTransaction(), Collections.emptyList(), List.of(selectedTxos), payments, Collections.emptyMap(), fee.getValue(), inputTransactions);
         }
+    }
+
+    private BlockTransactionHashIndex getBlockTransactionInput(Map<Sha256Hash, BlockTransaction> inputTransactions, TransactionInput txInput) {
+        if(inputTransactions != null) {
+            BlockTransaction blockTransaction = inputTransactions.get(txInput.getOutpoint().getHash());
+            if(blockTransaction != null) {
+                TransactionOutput txOutput = blockTransaction.getTransaction().getOutputs().get((int) txInput.getOutpoint().getIndex());
+                return new BlockTransactionHashIndex(blockTransaction.getHash(), blockTransaction.getHeight(), blockTransaction.getDate(), blockTransaction.getFee(), txInput.getOutpoint().getIndex(), txOutput.getValue());
+            }
+        }
+
+        return new BlockTransactionHashIndex(txInput.getOutpoint().getHash(), 0, null, null, txInput.getOutpoint().getIndex(), 0);
     }
 
     private Wallet getWalletFromTransactionInputs() {
@@ -1079,7 +1162,12 @@ public class HeadersController extends TransactionFormController implements Init
             if(feeAmt != null) {
                 updateFee(feeAmt);
             }
-            transactionDiagram.update(getWalletTransaction(event.getInputTransactions()));
+
+            Map<Sha256Hash, BlockTransaction> allFetchedInputTransactions = new HashMap<>(event.getInputTransactions());
+            if(headersForm.getInputTransactions() != null) {
+                allFetchedInputTransactions.putAll(headersForm.getInputTransactions());
+            }
+            transactionDiagram.update(getWalletTransaction(allFetchedInputTransactions));
         }
     }
 
@@ -1261,7 +1349,8 @@ public class HeadersController extends TransactionFormController implements Init
             for(WalletNode walletNode : event.getHistoryChangedNodes()) {
                 for(BlockTransactionHashIndex output : walletNode.getTransactionOutputs()) {
                     if(output.getHash().equals(txid) && output.getLabel() == null) { //If we send to ourselves, usually change
-                        output.setLabel(headersForm.getName() + (walletNode.getKeyPurpose() == KeyPurpose.CHANGE ? " (change)" : " (received)"));
+                        String label = outputIndexLabels.containsKey((int)output.getIndex()) ? outputIndexLabels.get((int)output.getIndex()) : headersForm.getName();
+                        output.setLabel(label + (walletNode.getKeyPurpose() == KeyPurpose.CHANGE ? " (change)" : " (received)"));
                         changedLabelEntries.add(new HashIndexEntry(event.getWallet(), output, HashIndexEntry.Type.OUTPUT, walletNode.getKeyPurpose()));
                     }
                     if(output.getSpentBy() != null && output.getSpentBy().getHash().equals(txid) && output.getSpentBy().getLabel() == null) { //The norm - sending out

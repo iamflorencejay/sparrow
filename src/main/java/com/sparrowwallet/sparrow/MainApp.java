@@ -8,7 +8,6 @@ import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5Brands;
 import com.sparrowwallet.sparrow.io.Config;
 import com.sparrowwallet.sparrow.io.Storage;
-import com.sparrowwallet.sparrow.net.Bwt;
 import com.sparrowwallet.sparrow.net.PublicElectrumServer;
 import com.sparrowwallet.sparrow.net.ServerType;
 import com.sparrowwallet.sparrow.preferences.PreferenceGroup;
@@ -31,7 +30,7 @@ import java.util.stream.Collectors;
 public class MainApp extends Application {
     public static final String APP_ID = "com.sparrowwallet.sparrow";
     public static final String APP_NAME = "Sparrow";
-    public static final String APP_VERSION = "1.5.2";
+    public static final String APP_VERSION = "1.5.5";
     public static final String APP_VERSION_SUFFIX = "";
     public static final String APP_HOME_PROPERTY = "sparrow.home";
     public static final String NETWORK_ENV_PROPERTY = "SPARROW_NETWORK";
@@ -77,7 +76,8 @@ public class MainApp extends Application {
                     createNewWallet = optNewWallet.isPresent() && optNewWallet.get();
                 } else if(Network.get() == Network.MAINNET) {
                     Config.get().setServerType(ServerType.PUBLIC_ELECTRUM_SERVER);
-                    Config.get().setPublicElectrumServer(PublicElectrumServer.values()[new Random().nextInt(PublicElectrumServer.values().length)].getUrl());
+                    List<PublicElectrumServer> servers = PublicElectrumServer.getServers();
+                    Config.get().setPublicElectrumServer(servers.get(new Random().nextInt(servers.size())).getUrl());
                 }
             }
         }

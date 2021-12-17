@@ -50,12 +50,23 @@ public class MixToController implements Initializable {
         allWallets.add(NONE_WALLET);
 
         List<Wallet> destinationWallets = AppServices.get().getOpenWallets().keySet().stream().filter(openWallet -> openWallet.isValid()
-                && (openWallet.getScriptType() == ScriptType.P2WPKH || openWallet.getScriptType() == ScriptType.P2WSH || openWallet.getScriptType() == ScriptType.P2TR)
+                && (openWallet.getScriptType() == ScriptType.P2WPKH || openWallet.getScriptType() == ScriptType.P2WSH)
                 && openWallet != wallet && openWallet != wallet.getMasterWallet()
                 && (openWallet.getStandardAccountType() == null || !StandardAccount.WHIRLPOOL_ACCOUNTS.contains(openWallet.getStandardAccountType()))).collect(Collectors.toList());
         allWallets.addAll(destinationWallets);
 
         mixToWallets.setItems(FXCollections.observableList(allWallets));
+        mixToWallets.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(Wallet wallet) {
+                return wallet == null ? "" : wallet.getFullDisplayName();
+            }
+
+            @Override
+            public Wallet fromString(String string) {
+                return null;
+            }
+        });
 
         String mixToWalletId = null;
         try {

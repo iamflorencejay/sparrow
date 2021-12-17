@@ -13,12 +13,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateEncodingException;
 import java.text.DateFormat;
+import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -172,22 +174,25 @@ public class Storage {
         deleteBackups(null);
     }
 
-    public void deleteTempBackups() {
+    public void deleteTempBackups(boolean forceSave) {
         File[] backups = getBackups(Storage.TEMP_BACKUP_PREFIX);
-        if(backups.length > 0) {
-            try {
-                Date date = BACKUP_DATE_FORMAT.parse(getBackupDate(backups[0].getName()));
-                ProcessHandle.Info processInfo = ProcessHandle.current().info();
-                if(processInfo.startInstant().isPresent() && processInfo.startInstant().get().isAfter(date.toInstant())) {
-                    File permanent = new File(backups[0].getParent(), backups[0].getName().substring(Storage.TEMP_BACKUP_PREFIX.length() + 1));
-                    backups[0].renameTo(permanent);
-                }
-            } catch(Exception e) {
-                log.error("Error copying temporary to permanent backup", e);
-            }
+        if(backups.length > 0 && (forceSave || hasStartedSince(backups[0]))) {
+            File permanent = new File(backups[0].getParent(), backups[0].getName().substring(Storage.TEMP_BACKUP_PREFIX.length() + 1));
+            backups[0].renameTo(permanent);
         }
 
         deleteBackups(Storage.TEMP_BACKUP_PREFIX);
+    }
+
+    private boolean hasStartedSince(File lastBackup) {
+        try {
+            Date date = BACKUP_DATE_FORMAT.parse(getBackupDate(lastBackup.getName()));
+            ProcessHandle.Info processInfo = ProcessHandle.current().info();
+            return (processInfo.startInstant().isPresent() && processInfo.startInstant().get().isAfter(date.toInstant()));
+        } catch(Exception e) {
+            log.error("Error parsing date for backup file " + lastBackup.getName(), e);
+            return false;
+        }
     }
 
     private void deleteBackups(String prefix) {
@@ -373,7 +378,7 @@ public class Storage {
     }
 
     public static PersistenceType detectPersistenceType(File walletFile) {
-        try(Reader reader = new FileReader(walletFile)) {
+        try(Reader reader = new FileReader(walletFile, StandardCharsets.UTF_8)) {
             int firstChar = reader.read();
 
             if(firstChar == 'U' || firstChar == '{') {

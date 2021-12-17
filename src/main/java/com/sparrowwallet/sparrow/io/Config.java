@@ -1,7 +1,6 @@
 package com.sparrowwallet.sparrow.io;
 
 import com.google.gson.*;
-import com.samourai.whirlpool.client.wallet.beans.IndexRange;
 import com.sparrowwallet.drongo.BitcoinUnit;
 import com.sparrowwallet.sparrow.Mode;
 import com.sparrowwallet.sparrow.Theme;
@@ -13,11 +12,11 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.lang.reflect.Type;
-import java.util.Arrays;
-import java.util.Currency;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 import java.util.stream.Collectors;
+
+import static com.sparrowwallet.sparrow.net.PagedBatchRequestBuilder.DEFAULT_PAGE_SIZE;
+import static com.sparrowwallet.sparrow.net.TcpTransport.DEFAULT_MAX_TIMEOUT;
 
 public class Config {
     private static final Logger log = LoggerFactory.getLogger(Config.class);
@@ -42,7 +41,6 @@ public class Config {
     private boolean hideEmptyUsedAddresses = false;
     private boolean showTransactionHex = true;
     private boolean showLoadingLog = true;
-    private boolean showUtxosChart = true;
     private boolean preventSleep = false;
     private List<File> recentWalletFiles;
     private Integer keyDerivationPeriod;
@@ -52,13 +50,19 @@ public class Config {
     private ServerType serverType;
     private String publicElectrumServer;
     private String coreServer;
+    private List<String> recentCoreServers;
     private CoreAuthType coreAuthType;
     private File coreDataDir;
     private String coreAuth;
     private String electrumServer;
+    private List<String> recentElectrumServers;
     private File electrumServerCert;
     private boolean useProxy;
     private String proxyServer;
+    private int maxServerTimeout = DEFAULT_MAX_TIMEOUT;
+    private int batchPageSize = DEFAULT_PAGE_SIZE;
+    private boolean usePayNym;
+    private boolean sameAppMixing;
     private Double appWidth;
     private Double appHeight;
 
@@ -270,15 +274,6 @@ public class Config {
         flush();
     }
 
-    public boolean isShowUtxosChart() {
-        return showUtxosChart;
-    }
-
-    public void setShowUtxosChart(boolean showUtxosChart) {
-        this.showUtxosChart = showUtxosChart;
-        flush();
-    }
-
     public boolean isPreventSleep() {
         return preventSleep;
     }
@@ -384,8 +379,10 @@ public class Config {
     }
 
     public void changePublicServer() {
-        List<String> otherServers = Arrays.stream(PublicElectrumServer.values()).map(PublicElectrumServer::getUrl).filter(url -> !url.equals(getPublicElectrumServer())).collect(Collectors.toList());
-        setPublicElectrumServer(otherServers.get(new Random().nextInt(otherServers.size())));
+        List<String> otherServers = PublicElectrumServer.getServers().stream().map(PublicElectrumServer::getUrl).filter(url -> !url.equals(getPublicElectrumServer())).collect(Collectors.toList());
+        if(!otherServers.isEmpty()) {
+            setPublicElectrumServer(otherServers.get(new Random().nextInt(otherServers.size())));
+        }
     }
 
     public String getCoreServer() {
@@ -395,6 +392,23 @@ public class Config {
     public void setCoreServer(String coreServer) {
         this.coreServer = coreServer;
         flush();
+    }
+
+    public List<String> getRecentCoreServers() {
+        return recentCoreServers;
+    }
+
+    public void addRecentCoreServer(String coreServer) {
+        if(recentCoreServers == null) {
+            recentCoreServers = new ArrayList<>();
+        }
+
+        if(!recentCoreServers.contains(coreServer)) {
+            recentCoreServers.stream().filter(url -> Objects.equals(Protocol.getHost(url), Protocol.getHost(coreServer)))
+                    .findFirst().ifPresent(existingUrl -> recentCoreServers.remove(existingUrl));
+            recentCoreServers.add(coreServer);
+            flush();
+        }
     }
 
     public CoreAuthType getCoreAuthType() {
@@ -433,6 +447,31 @@ public class Config {
         flush();
     }
 
+    public List<String> getRecentElectrumServers() {
+        return recentElectrumServers;
+    }
+
+    public void addRecentServer() {
+        if(serverType == ServerType.BITCOIN_CORE && coreServer != null) {
+            addRecentCoreServer(coreServer);
+        } else if(serverType == ServerType.ELECTRUM_SERVER && electrumServer != null) {
+            addRecentElectrumServer(electrumServer);
+        }
+    }
+
+    public void addRecentElectrumServer(String electrumServer) {
+        if(recentElectrumServers == null) {
+            recentElectrumServers = new ArrayList<>();
+        }
+
+        if(!recentElectrumServers.contains(electrumServer)) {
+            recentElectrumServers.stream().filter(url -> Objects.equals(Protocol.getHost(url), Protocol.getHost(electrumServer)))
+                    .findFirst().ifPresent(existingUrl -> recentElectrumServers.remove(existingUrl));
+            recentElectrumServers.add(electrumServer);
+            flush();
+        }
+    }
+
     public File getElectrumServerCert() {
         return electrumServerCert;
     }
@@ -457,6 +496,32 @@ public class Config {
 
     public void setProxyServer(String proxyServer) {
         this.proxyServer = proxyServer;
+        flush();
+    }
+
+    public int getMaxServerTimeout() {
+        return maxServerTimeout;
+    }
+
+    public int getBatchPageSize() {
+        return batchPageSize;
+    }
+
+    public boolean isUsePayNym() {
+        return usePayNym;
+    }
+
+    public void setUsePayNym(boolean usePayNym) {
+        this.usePayNym = usePayNym;
+        flush();
+    }
+
+    public boolean isSameAppMixing() {
+        return sameAppMixing;
+    }
+
+    public void setSameAppMixing(boolean sameAppMixing) {
+        this.sameAppMixing = sameAppMixing;
         flush();
     }
 

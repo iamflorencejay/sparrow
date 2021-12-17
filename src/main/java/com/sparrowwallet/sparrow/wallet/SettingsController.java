@@ -304,7 +304,7 @@ public class SettingsController extends WalletFormController implements Initiali
             } else if(result.wallets != null) {
                 for(Wallet wallet : result.wallets) {
                     if(scriptType.getValue().equals(wallet.getScriptType()) && !wallet.getKeystores().isEmpty()) {
-                        OutputDescriptor outputDescriptor = OutputDescriptor.getOutputDescriptor(walletForm.getWallet());
+                        OutputDescriptor outputDescriptor = OutputDescriptor.getOutputDescriptor(wallet);
                         setDescriptorText(outputDescriptor.toString());
                         break;
                     }
@@ -360,6 +360,8 @@ public class SettingsController extends WalletFormController implements Initiali
             return List.of(ScriptExpression.SCRIPT_HASH, ScriptExpression.WITNESS_SCRIPT_HASH);
         } else if(scriptType == ScriptType.P2WSH) {
             return List.of(ScriptExpression.WITNESS_SCRIPT_HASH);
+        } else if(scriptType == ScriptType.P2TR) {
+            return List.of(ScriptExpression.TAPROOT);
         }
 
         throw new IllegalArgumentException("Unknown script type of " + scriptType);
@@ -374,7 +376,7 @@ public class SettingsController extends WalletFormController implements Initiali
     }
 
     public void editDescriptor(ActionEvent event) {
-        OutputDescriptor outputDescriptor = OutputDescriptor.getOutputDescriptor(walletForm.getWallet());
+        OutputDescriptor outputDescriptor = OutputDescriptor.getOutputDescriptor(walletForm.getWallet(), KeyPurpose.DEFAULT_PURPOSES, null);
         String outputDescriptorString = outputDescriptor.toString(walletForm.getWallet().isValid());
 
         TextAreaDialog dialog = new TextAreaDialog(outputDescriptorString);
@@ -406,7 +408,7 @@ public class SettingsController extends WalletFormController implements Initiali
     }
 
     public void showDescriptor(ActionEvent event) {
-        OutputDescriptor outputDescriptor = OutputDescriptor.getOutputDescriptor(walletForm.getWallet());
+        OutputDescriptor outputDescriptor = OutputDescriptor.getOutputDescriptor(walletForm.getWallet(), KeyPurpose.DEFAULT_PURPOSES, null);
         String outputDescriptorString = outputDescriptor.toString(walletForm.getWallet().isValid());
 
         TextAreaDialog dialog = new TextAreaDialog(outputDescriptorString, false);
@@ -484,6 +486,9 @@ public class SettingsController extends WalletFormController implements Initiali
                             ElectrumServer.WalletDiscoveryService walletDiscoveryService = new ElectrumServer.WalletDiscoveryService(masterWallet, standardAccounts);
                             walletDiscoveryService.setOnSucceeded(event -> {
                                 addAndEncryptAccounts(masterWallet, walletDiscoveryService.getValue(), key);
+                                if(walletDiscoveryService.getValue().isEmpty()) {
+                                    AppServices.showAlertDialog("No Accounts Found", "No new accounts with existing transactions were found. Note only the first 10 accounts are scanned.", Alert.AlertType.INFORMATION, ButtonType.OK);
+                                }
                             });
                             walletDiscoveryService.setOnFailed(event -> {
                                 log.error("Failed to discover accounts", event.getSource().getException());
@@ -514,6 +519,9 @@ public class SettingsController extends WalletFormController implements Initiali
                     ElectrumServer.WalletDiscoveryService walletDiscoveryService = new ElectrumServer.WalletDiscoveryService(masterWallet, standardAccounts);
                     walletDiscoveryService.setOnSucceeded(event -> {
                         addAndSaveAccounts(masterWallet, walletDiscoveryService.getValue());
+                        if(walletDiscoveryService.getValue().isEmpty()) {
+                            AppServices.showAlertDialog("No Accounts Found", "No new accounts with existing transactions were found. Note only the first 10 accounts are scanned.", Alert.AlertType.INFORMATION, ButtonType.OK);
+                        }
                     });
                     walletDiscoveryService.setOnFailed(event -> {
                         log.error("Failed to discover accounts", event.getSource().getException());
@@ -531,13 +539,17 @@ public class SettingsController extends WalletFormController implements Initiali
                 Optional<Map<StandardAccount, Keystore>> optDiscoveredKeystores = deviceKeystoreDiscoverDialog.showAndWait();
                 if(optDiscoveredKeystores.isPresent()) {
                     Map<StandardAccount, Keystore> discoveredKeystores = optDiscoveredKeystores.get();
-                    for(Map.Entry<StandardAccount, Keystore> entry : discoveredKeystores.entrySet()) {
-                        Wallet childWallet = masterWallet.addChildWallet(entry.getKey());
-                        childWallet.getKeystores().clear();
-                        childWallet.getKeystores().add(entry.getValue());
-                        EventManager.get().post(new ChildWalletAddedEvent(getWalletForm().getStorage(), masterWallet, childWallet));
+                    if(discoveredKeystores.isEmpty()) {
+                        AppServices.showAlertDialog("No Accounts Found", "No new accounts with existing transactions were found. Note only the first 10 accounts are scanned.", Alert.AlertType.INFORMATION, ButtonType.OK);
+                    } else {
+                        for(Map.Entry<StandardAccount, Keystore> entry : discoveredKeystores.entrySet()) {
+                            Wallet childWallet = masterWallet.addChildWallet(entry.getKey());
+                            childWallet.getKeystores().clear();
+                            childWallet.getKeystores().add(entry.getValue());
+                            EventManager.get().post(new ChildWalletAddedEvent(getWalletForm().getStorage(), masterWallet, childWallet));
+                        }
+                        saveChildWallets(masterWallet);
                     }
-                    saveChildWallets(masterWallet);
                 }
             } else {
                 for(StandardAccount standardAccount : standardAccounts) {

@@ -28,6 +28,7 @@
                             </items>
                         </Menu>
                         <MenuItem fx:id="saveTransaction" mnemonicParsing="false" text="Save Transaction..." accelerator="Shortcut+S" onAction="#saveTransaction"/>
+                        <MenuItem fx:id="showTransaction" mnemonicParsing="false" text="Show Transaction as QR..." onAction="#showTransaction"/>
                         <Menu fx:id="savePSBT" mnemonicParsing="false" text="Save PSBT">
                             <MenuItem fx:id="savePSBTBinary" text="As Binary..." onAction="#savePSBTBinary" accelerator="Shortcut+S"/>
                             <MenuItem text="As Base64..." onAction="#savePSBTText"/>
@@ -40,6 +41,7 @@
                                 <MenuItem text="As Base64..." onAction="#savePSBTTextNoXpubs"/>
                             </Menu>
                         </Menu>
+                        <MenuItem fx:id="showPSBT" mnemonicParsing="false" text="Show PSBT as QR..." onAction="#showPSBT"/>
                         <SeparatorMenuItem />
                         <MenuItem mnemonicParsing="false" text="Import Wallet..." onAction="#importWallet"/>
                         <MenuItem fx:id="exportWallet" mnemonicParsing="false" text="Export Wallet..." onAction="#exportWallet"/>
@@ -96,19 +98,23 @@
                         <CheckMenuItem fx:id="hideEmptyUsedAddresses" mnemonicParsing="false" text="Hide Empty Used Addresses" onAction="#hideEmptyUsedAddresses"/>
                         <CheckMenuItem fx:id="useHdCameraResolution" mnemonicParsing="false" text="Use HD Camera Resolution" onAction="#useHdCameraResolution"/>
                         <CheckMenuItem fx:id="showLoadingLog" mnemonicParsing="false" text="Show Wallet Loading Log" onAction="#showLoadingLog" />
-                        <CheckMenuItem fx:id="showUtxosChart" mnemonicParsing="false" text="Show UTXOs Chart" onAction="#showUtxosChart" />
                         <CheckMenuItem fx:id="showTxHex" mnemonicParsing="false" text="Show Transaction Hex" onAction="#showTxHex"/>
                         <SeparatorMenuItem />
                         <MenuItem fx:id="minimizeToTray" mnemonicParsing="false" text="Minimize to System Tray" accelerator="Shortcut+Y" onAction="#minimizeToTray"/>
                         <MenuItem fx:id="lockWallet" mnemonicParsing="false" text="Lock Wallet" accelerator="Shortcut+L" onAction="#lockWallet"/>
+                        <MenuItem mnemonicParsing="false" text="Lock All Wallets" accelerator="Shortcut+Shift+L" onAction="#lockWallets"/>
+                        <SeparatorMenuItem />
                         <MenuItem fx:id="refreshWallet" mnemonicParsing="false" text="Refresh Wallet" accelerator="Shortcut+R" onAction="#refreshWallet"/>
                     </items>
                 </Menu>
                 <Menu fx:id="toolsMenu" mnemonicParsing="false" text="Tools">
                     <MenuItem mnemonicParsing="false" text="Sign/Verify Message" accelerator="Shortcut+M" onAction="#signVerifyMessage"/>
                     <MenuItem fx:id="sendToMany" mnemonicParsing="false" text="Send To Many" onAction="#sendToMany"/>
-                    <MenuItem styleClass="osxHide,windowsHide" mnemonicParsing="false" text="Install Udev Rules" onAction="#installUdevRules"/>
                     <SeparatorMenuItem />
+                    <MenuItem fx:id="findMixingPartner" mnemonicParsing="false" text="Find Mix Partner" onAction="#findMixingPartner"/>
+                    <MenuItem fx:id="showPayNym" mnemonicParsing="false" text="Show PayNym" onAction="#showPayNym"/>
+                    <SeparatorMenuItem />
+                    <MenuItem styleClass="osxHide,windowsHide" mnemonicParsing="false" text="Install Udev Rules" onAction="#installUdevRules"/>
                     <CheckMenuItem fx:id="preventSleep" mnemonicParsing="false" text="Prevent Computer Sleep" onAction="#preventSleep"/>
                 </Menu>
                 <Menu fx:id="helpMenu" mnemonicParsing="false" text="Help">

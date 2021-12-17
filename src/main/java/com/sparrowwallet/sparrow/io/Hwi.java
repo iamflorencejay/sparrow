@@ -39,16 +39,17 @@ public class Hwi {
     private static boolean isPromptActive = false;
 
     public List<Device> enumerate(String passphrase) throws ImportException {
+        String output = null;
         try {
             List<String> command;
             if(passphrase != null && !passphrase.isEmpty()) {
-                command = List.of(getHwiExecutable(Command.ENUMERATE).getAbsolutePath(), "--password", passphrase, Command.ENUMERATE.toString());
+                command = List.of(getHwiExecutable(Command.ENUMERATE).getAbsolutePath(), "--password", escape(passphrase), Command.ENUMERATE.toString());
             } else {
                 command = List.of(getHwiExecutable(Command.ENUMERATE).getAbsolutePath(), Command.ENUMERATE.toString());
             }
 
             isPromptActive = true;
-            String output = execute(command);
+            output = execute(command);
             Device[] devices = getGson().fromJson(output, Device[].class);
             if(devices == null) {
                 throw new ImportException("Error scanning, check devices are ready");
@@ -56,7 +57,19 @@ public class Hwi {
             return Arrays.stream(devices).filter(device -> device != null && device.getModel() != null).collect(Collectors.toList());
         } catch(IOException e) {
             log.error("Error executing " + HWI_VERSION_DIR, e);
-            throw new ImportException(e);
+            throw new ImportException("Error executing HWI", e);
+        } catch(Exception e) {
+            if(output != null) {
+                try {
+                    JsonObject result = JsonParser.parseString(output).getAsJsonObject();
+                    JsonElement error = result.get("error");
+                    throw new ImportException(error.getAsString());
+                } catch(Exception ex) {
+                    log.error("Error parsing JSON: " + output, e);
+                    throw new ImportException("Error parsing JSON: " + output, e);
+                }
+            }
+            throw e;
         } finally {
             isPromptActive = false;
         }
@@ -220,7 +233,7 @@ public class Hwi {
         } catch(IOException e) {
             throw new SignTransactionException("Could not sign PSBT", e);
         } catch(PSBTParseException e) {
-            throw new SignTransactionException("Could not parsed signed PSBT", e);
+            throw new SignTransactionException("Could not parse signed PSBT", e);
         } finally {
             isPromptActive = false;
         }
@@ -401,7 +414,7 @@ public class Hwi {
     }
 
     private List<String> getDeviceCommand(Device device, String passphrase, Command command, String... commandData) throws IOException {
-        List<String> elements = new ArrayList<>(List.of(getHwiExecutable(command).getAbsolutePath(), "--device-path", device.getPath(), "--device-type", device.getType(), "--password", passphrase, command.toString()));
+        List<String> elements = new ArrayList<>(List.of(getHwiExecutable(command).getAbsolutePath(), "--device-path", device.getPath(), "--device-type", device.getType(), "--password", escape(passphrase), command.toString()));
         addChainType(elements);
         elements.addAll(Arrays.stream(commandData).filter(Objects::nonNull).collect(Collectors.toList()));
         return elements;
@@ -422,6 +435,15 @@ public class Hwi {
         }
 
         return network.toString();
+    }
+
+    private String escape(String passphrase) {
+        Platform platform = Platform.getCurrent();
+        if(platform == Platform.WINDOWS) {
+            return passphrase.replace("\"", "\\\"");
+        }
+
+        return passphrase;
     }
 
     public static class EnumerateService extends Service<List<Device>> {

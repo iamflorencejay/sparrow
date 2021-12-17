@@ -57,7 +57,7 @@ public class Whirlpool {
     private static final Logger log = LoggerFactory.getLogger(Whirlpool.class);
 
     public static final List<Network> WHIRLPOOL_NETWORKS = List.of(Network.MAINNET, Network.TESTNET);
-    public static final int DEFAULT_MIXTO_MIN_MIXES = 5;
+    public static final int DEFAULT_MIXTO_MIN_MIXES = 3;
     public static final int DEFAULT_MIXTO_RANDOM_FACTOR = 4;
 
     private final WhirlpoolServer whirlpoolServer;
@@ -308,6 +308,32 @@ public class Whirlpool {
         if(whirlpoolUtxo != null) {
             whirlpoolUtxo.setMixsDone(mixesDone);
         }
+    }
+
+    public void checkIfMixing() {
+        if(whirlpoolWalletService.whirlpoolWallet() == null) {
+            return;
+        }
+
+        if(isMixing()) {
+            if(!whirlpoolWalletService.whirlpoolWallet().isStarted()) {
+                log.warn("Wallet is not started, but mixingProperty is true");
+                WhirlpoolEventService.getInstance().post(new WalletStopEvent(whirlpoolWalletService.whirlpoolWallet()));
+            } else if(whirlpoolWalletService.whirlpoolWallet().getMixingState().getUtxosMixing().isEmpty()) {
+                log.warn("No UTXOs mixing, but mixingProperty is true");
+                //Will automatically restart
+                AppServices.getWhirlpoolServices().stopWhirlpool(this, false);
+            }
+        }
+    }
+
+    public void logDebug() {
+        if(whirlpoolWalletService.whirlpoolWallet() == null) {
+            log.warn("Whirlpool wallet for " + walletId + " not started");
+            return;
+        }
+
+        log.warn("Whirlpool debug for " + walletId + "\n" + whirlpoolWalletService.whirlpoolWallet().getDebug());
     }
 
     public boolean hasWallet() {

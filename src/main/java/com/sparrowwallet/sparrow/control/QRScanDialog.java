@@ -10,6 +10,8 @@ import com.sparrowwallet.drongo.address.P2PKHAddress;
 import com.sparrowwallet.drongo.address.P2SHAddress;
 import com.sparrowwallet.drongo.address.P2WPKHAddress;
 import com.sparrowwallet.drongo.crypto.*;
+import com.sparrowwallet.drongo.policy.Policy;
+import com.sparrowwallet.drongo.policy.PolicyType;
 import com.sparrowwallet.drongo.protocol.Base43;
 import com.sparrowwallet.drongo.protocol.ScriptType;
 import com.sparrowwallet.drongo.protocol.Transaction;
@@ -491,6 +493,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 keystore.setKeyDerivation(new KeyDerivation(masterFingerprint, KeyDerivation.writePath(outputDescriptor.getKeyDerivation(extendedKey).getDerivation())));
                 keystore.setExtendedPublicKey(extendedKey);
                 wallet.getKeystores().add(keystore);
+                wallet.setDefaultPolicy(Policy.getPolicy(outputDescriptor.isCosigner() ? PolicyType.MULTI : PolicyType.SINGLE, wallet.getScriptType(), wallet.getKeystores(), 1));
                 wallets.add(wallet);
             }
 
@@ -499,7 +502,9 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
 
         private ScriptType getScriptType(List<ScriptExpression> scriptExpressions) {
             List<ScriptExpression> expressions = new ArrayList<>(scriptExpressions);
-            if(expressions.get(expressions.size() - 1) == ScriptExpression.MULTISIG || expressions.get(expressions.size() - 1) == ScriptExpression.SORTED_MULTISIG) {
+            if(expressions.get(expressions.size() - 1) == ScriptExpression.MULTISIG
+                    || expressions.get(expressions.size() - 1) == ScriptExpression.SORTED_MULTISIG
+                    || expressions.get(expressions.size() - 1) == ScriptExpression.COSIGNER) {
                 expressions.remove(expressions.size() - 1);
             }
 
@@ -515,6 +520,8 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 return ScriptType.P2SH_P2WSH;
             } else if(List.of(ScriptExpression.WITNESS_SCRIPT_HASH).equals(expressions)) {
                 return ScriptType.P2WSH;
+            } else if(List.of(ScriptExpression.TAPROOT).equals(expressions)) {
+                return ScriptType.P2TR;
             }
 
             throw new IllegalArgumentException("Unknown script of " + expressions);

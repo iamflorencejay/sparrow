@@ -6,6 +6,7 @@ import com.sparrowwallet.drongo.Network;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.Mode;
+import com.sparrowwallet.sparrow.control.ComboBoxTextField;
 import com.sparrowwallet.sparrow.control.TextFieldValidator;
 import com.sparrowwallet.sparrow.control.UnlabeledToggleSwitch;
 import com.sparrowwallet.sparrow.event.*;
@@ -15,6 +16,7 @@ import com.sparrowwallet.sparrow.io.Storage;
 import com.sparrowwallet.sparrow.net.*;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
+import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.text.Font;
@@ -22,6 +24,7 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
+import javafx.util.StringConverter;
 import org.berndpruenster.netlayer.tor.Tor;
 import org.controlsfx.control.SegmentedButton;
 import org.controlsfx.glyphfont.Glyph;
@@ -40,6 +43,7 @@ import java.io.FileInputStream;
 import java.security.cert.CertificateFactory;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
@@ -75,7 +79,10 @@ public class ServerPreferencesController extends PreferencesDetailController {
     private Form coreForm;
 
     @FXML
-    private TextField coreHost;
+    private ComboBox<String> recentCoreServers;
+
+    @FXML
+    private ComboBoxTextField coreHost;
 
     @FXML
     private TextField corePort;
@@ -114,7 +121,10 @@ public class ServerPreferencesController extends PreferencesDetailController {
     private Form electrumForm;
 
     @FXML
-    private TextField electrumHost;
+    private ComboBox<String> recentElectrumServers;
+
+    @FXML
+    private ComboBoxTextField electrumHost;
 
     @FXML
     private TextField electrumPort;
@@ -186,15 +196,16 @@ public class ServerPreferencesController extends PreferencesDetailController {
             }
         });
         ServerType serverType = config.getServerType() != null ?
-                (config.getServerType() == ServerType.PUBLIC_ELECTRUM_SERVER && Network.get() != Network.MAINNET ? ServerType.BITCOIN_CORE : config.getServerType()) :
+                (config.getServerType() == ServerType.PUBLIC_ELECTRUM_SERVER && !PublicElectrumServer.supportedNetwork() ? ServerType.BITCOIN_CORE : config.getServerType()) :
                     (config.getCoreServer() == null && config.getElectrumServer() != null ? ServerType.ELECTRUM_SERVER :
-                        (config.getCoreServer() != null || Network.get() != Network.MAINNET ? ServerType.BITCOIN_CORE : ServerType.PUBLIC_ELECTRUM_SERVER));
-        if(Network.get() != Network.MAINNET) {
+                        (config.getCoreServer() != null || !PublicElectrumServer.supportedNetwork() ? ServerType.BITCOIN_CORE : ServerType.PUBLIC_ELECTRUM_SERVER));
+        if(!PublicElectrumServer.supportedNetwork()) {
             serverTypeSegmentedButton.getButtons().remove(publicElectrumToggle);
             serverTypeToggleGroup.getToggles().remove(publicElectrumToggle);
         }
         serverTypeToggleGroup.selectToggle(serverTypeToggleGroup.getToggles().stream().filter(toggle -> toggle.getUserData() == serverType).findFirst().orElse(null));
 
+        publicElectrumServer.setItems(FXCollections.observableList(PublicElectrumServer.getServers()));
         publicElectrumServer.getSelectionModel().selectedItemProperty().addListener(getPublicElectrumServerListener(config));
 
         publicUseProxy.selectedProperty().bindBidirectional(useProxy.selectedProperty());
@@ -253,6 +264,29 @@ public class ServerPreferencesController extends PreferencesDetailController {
             File dataDir = directorChooser.showDialog(window);
             if(dataDir != null) {
                 coreDataDir.setText(dataDir.getAbsolutePath());
+            }
+        });
+
+        recentCoreServers.setConverter(new UrlHostConverter());
+        recentCoreServers.setItems(FXCollections.observableList(Config.get().getRecentCoreServers() == null ? new ArrayList<>() : Config.get().getRecentCoreServers()));
+        recentCoreServers.prefWidthProperty().bind(coreHost.widthProperty());
+        recentCoreServers.valueProperty().addListener((observable, oldValue, newValue) -> {
+            if(newValue != null && Protocol.getProtocol(newValue) != null) {
+                HostAndPort hostAndPort = Protocol.getProtocol(newValue).getServerHostAndPort(newValue);
+                coreHost.setText(hostAndPort.getHost());
+                corePort.setText(Integer.toString(hostAndPort.getPort()));
+            }
+        });
+
+        recentElectrumServers.setConverter(new UrlHostConverter());
+        recentElectrumServers.setItems(FXCollections.observableList(Config.get().getRecentElectrumServers() == null ? new ArrayList<>() : Config.get().getRecentElectrumServers()));
+        recentElectrumServers.prefWidthProperty().bind(electrumHost.widthProperty());
+        recentElectrumServers.valueProperty().addListener((observable, oldValue, newValue) -> {
+            if(newValue != null && Protocol.getProtocol(newValue) != null) {
+                HostAndPort hostAndPort = Protocol.getProtocol(newValue).getServerHostAndPort(newValue);
+                electrumHost.setText(hostAndPort.getHost());
+                electrumPort.setText(Integer.toString(hostAndPort.getPort()));
+                electrumUseSsl.setSelected(Protocol.getProtocol(newValue) == Protocol.SSL);
             }
         });
 
@@ -326,7 +360,8 @@ public class ServerPreferencesController extends PreferencesDetailController {
 
         PublicElectrumServer configPublicElectrumServer = PublicElectrumServer.fromUrl(config.getPublicElectrumServer());
         if(configPublicElectrumServer == null) {
-            publicElectrumServer.setValue(PublicElectrumServer.values()[new Random().nextInt(PublicElectrumServer.values().length)]);
+            List<PublicElectrumServer> servers = PublicElectrumServer.getServers();
+            publicElectrumServer.setValue(servers.get(new Random().nextInt(servers.size())));
         } else {
             publicElectrumServer.setValue(configPublicElectrumServer);
         }
@@ -804,5 +839,17 @@ public class ServerPreferencesController extends PreferencesDetailController {
                 testResults.appendText("\n" + event.getStatus());
             }
         });
+    }
+
+    private static class UrlHostConverter extends StringConverter<String> {
+        @Override
+        public String toString(String serverUrl) {
+            return serverUrl == null || Protocol.getProtocol(serverUrl) == null ? "" : Protocol.getProtocol(serverUrl).getServerHostAndPort(serverUrl).getHost();
+        }
+
+        @Override
+        public String fromString(String string) {
+            return null;
+        }
     }
 }

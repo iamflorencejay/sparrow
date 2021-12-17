@@ -10,12 +10,15 @@ import com.sparrowwallet.sparrow.WalletTabData;
 import com.sparrowwallet.sparrow.event.*;
 import com.sparrowwallet.sparrow.io.Config;
 import com.sparrowwallet.sparrow.io.StorageException;
+import com.sparrowwallet.sparrow.net.AllHistoryChangedException;
 import com.sparrowwallet.sparrow.net.ElectrumServer;
 import com.sparrowwallet.sparrow.io.Storage;
 import com.sparrowwallet.sparrow.net.ServerType;
 import javafx.application.Platform;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +41,7 @@ public class WalletForm {
     private WalletUtxosEntry walletUtxosEntry;
     private final List<NodeEntry> accountEntries = new ArrayList<>();
     private final List<Set<WalletNode>> walletTransactionNodes = new ArrayList<>();
+    private final ObjectProperty<WalletTransaction> createdWalletTransactionProperty = new SimpleObjectProperty<>(null);
 
     private ElectrumServer.TransactionMempoolService transactionMempoolService;
 
@@ -140,13 +144,25 @@ public class WalletForm {
                 }
             });
             historyService.setOnFailed(workerStateEvent -> {
-                if(AppServices.isConnected()) {
-                    log.error("Error retrieving wallet history", workerStateEvent.getSource().getException());
-                } else {
-                    log.debug("Disconnected while retrieving wallet history", workerStateEvent.getSource().getException());
-                }
+                if(workerStateEvent.getSource().getException() instanceof AllHistoryChangedException) {
+                    try {
+                        storage.backupWallet();
+                    } catch(IOException e) {
+                        log.error("Error backing up wallet", e);
+                    }
 
-                EventManager.get().post(new WalletHistoryFailedEvent(wallet, workerStateEvent.getSource().getException()));
+                    wallet.clearHistory();
+                    AppServices.clearTransactionHistoryCache(wallet);
+                    EventManager.get().post(new WalletHistoryClearedEvent(wallet, pastWallet, getWalletId()));
+                } else {
+                    if(AppServices.isConnected()) {
+                        log.error("Error retrieving wallet history", workerStateEvent.getSource().getException());
+                    } else {
+                        log.debug("Disconnected while retrieving wallet history", workerStateEvent.getSource().getException());
+                    }
+
+                    EventManager.get().post(new WalletHistoryFailedEvent(wallet, workerStateEvent.getSource().getException()));
+                }
             });
 
             EventManager.get().post(new WalletHistoryStartedEvent(wallet, nodes));
@@ -195,7 +211,9 @@ public class WalletForm {
             }
         }
 
-        storage.deleteTempBackups();
+        //Force saving the backup if the current wallet has fewer transactions than the past wallet (i.e. incomplete load)
+        storage.deleteTempBackups(wallet.getTransactions().size() < pastWallet.getTransactions().size());
+
         return changedEntries;
     }
 
@@ -271,6 +289,14 @@ public class WalletForm {
         return allNodes.isEmpty() ? walletNodes : allNodes;
     }
 
+    public WalletTransaction getCreatedWalletTransaction() {
+        return createdWalletTransactionProperty.get();
+    }
+
+    public void setCreatedWalletTransaction(WalletTransaction createdWalletTransaction) {
+        this.createdWalletTransactionProperty.set(createdWalletTransaction);
+    }
+
     public NodeEntry getNodeEntry(KeyPurpose keyPurpose) {
         NodeEntry purposeEntry;
         Optional<NodeEntry> optionalPurposeEntry = accountEntries.stream().filter(entry -> entry.getNode().getKeyPurpose().equals(keyPurpose)).findFirst();
@@ -315,6 +341,10 @@ public class WalletForm {
         }
 
         return walletUtxosEntry;
+    }
+
+    public boolean isLocked() {
+        return lockedProperty.get();
     }
 
     public BooleanProperty lockedProperty() {
@@ -486,6 +516,14 @@ public class WalletForm {
             } else {
                 Platform.runLater(() -> EventManager.get().post(new WalletDataChangedEvent(wallet)));
             }
+        }
+    }
+
+    @Subscribe
+    public void walletDeleted(WalletDeletedEvent event) {
+        if(event.getWallet() == wallet && !wallet.isMasterWallet()) {
+            wallet.getMasterWallet().getChildWallets().remove(wallet);
+            Platform.runLater(() -> EventManager.get().post(new WalletDataChangedEvent(wallet)));
         }
     }
 

@@ -28,10 +28,10 @@
             </rowConstraints>
 
             <Form GridPane.columnIndex="0" GridPane.rowIndex="0">
-                <Fieldset inputGrow="SOMETIMES" text="Mix To Settings">
+                <Fieldset inputGrow="SOMETIMES" text="Mix To Settings" styleClass="relaxedLabelFieldSet">
                     <Field text="Mix to wallet:">
-                        <ComboBox fx:id="mixToWallets" prefWidth="140" promptText="None available" />
-                        <HelpLabel helpText="Select a single signature wallet that is already open to mix to."/>
+                        <ComboBox fx:id="mixToWallets" prefWidth="160" promptText="None available" />
+                        <HelpLabel helpText="Select an open wallet to mix to."/>
                     </Field>
                     <Field text="Minimum mixes:">
                         <Spinner fx:id="minMixes" editable="true" prefWidth="90" />
@@ -41,9 +41,9 @@
             </Form>
 
             <Form GridPane.columnIndex="0" GridPane.rowIndex="1">
-                <Fieldset inputGrow="SOMETIMES" text="Postmix Wallet Settings">
+                <Fieldset inputGrow="SOMETIMES" text="Postmix Wallet Settings" styleClass="relaxedLabelFieldSet">
                     <Field text="Index range:">
-                        <ComboBox fx:id="indexRange" prefWidth="140">
+                        <ComboBox fx:id="indexRange" prefWidth="160">
                             <items>
                                 <FXCollections fx:factory="observableArrayList">
                                     <IndexRange fx:constant="FULL" />

@@ -39,6 +39,8 @@ import java.util.stream.Collectors;
 public class KeystoreController extends WalletFormController implements Initializable {
     private static final Logger log = LoggerFactory.getLogger(KeystoreController.class);
 
+    private static final String DEFAULT_WATCH_ONLY_FINGERPRINT = "00000000";
+
     private Keystore keystore;
 
     @FXML
@@ -215,6 +217,7 @@ public class KeystoreController extends WalletFormController implements Initiali
         if(keystoreSource != KeystoreSource.SW_WATCH) {
             launchImportDialog(keystoreSource);
         } else {
+            fingerprint.setText(DEFAULT_WATCH_ONLY_FINGERPRINT);
             selectSourcePane.setVisible(false);
         }
     }
@@ -391,6 +394,24 @@ public class KeystoreController extends WalletFormController implements Initiali
             QRScanDialog.Result result = optionalResult.get();
             if(result.extendedKey != null && result.extendedKey.getKey().isPubKeyOnly()) {
                 xpub.setText(result.extendedKey.getExtendedKey());
+            } else if(result.outputDescriptor != null && !result.outputDescriptor.getExtendedPublicKeys().isEmpty()) {
+                ExtendedKey extendedKey = result.outputDescriptor.getExtendedPublicKeys().iterator().next();
+                KeyDerivation keyDerivation = result.outputDescriptor.getKeyDerivation(extendedKey);
+                fingerprint.setText(keyDerivation.getMasterFingerprint());
+                derivation.setText(keyDerivation.getDerivationPath());
+                xpub.setText(extendedKey.toString());
+            } else if(result.wallets != null) {
+                for(Wallet wallet : result.wallets) {
+                    if(getWalletForm().getWallet().getScriptType().equals(wallet.getScriptType()) && !wallet.getKeystores().isEmpty()) {
+                        Keystore keystore = wallet.getKeystores().get(0);
+                        fingerprint.setText(keystore.getKeyDerivation().getMasterFingerprint());
+                        derivation.setText(keystore.getKeyDerivation().getDerivationPath());
+                        xpub.setText(keystore.getExtendedPublicKey().toString());
+                        return;
+                    }
+                }
+
+                AppServices.showErrorDialog("Missing Script Type", "QR Code did not contain any information for the " + getWalletForm().getWallet().getScriptType().getDescription() + " script type.");
             } else if(result.exception != null) {
                 log.error("Error scanning QR", result.exception);
                 AppServices.showErrorDialog("Error scanning QR", result.exception.getMessage());

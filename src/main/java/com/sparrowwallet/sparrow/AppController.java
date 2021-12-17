@@ -17,6 +17,8 @@ import com.sparrowwallet.drongo.psbt.PSBTInput;
 import com.sparrowwallet.drongo.psbt.PSBTParseException;
 import com.sparrowwallet.drongo.psbt.PSBTSignatureException;
 import com.sparrowwallet.drongo.wallet.*;
+import com.sparrowwallet.hummingbird.UR;
+import com.sparrowwallet.hummingbird.registry.CryptoPSBT;
 import com.sparrowwallet.sparrow.control.*;
 import com.sparrowwallet.sparrow.event.*;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
@@ -25,6 +27,10 @@ import com.sparrowwallet.sparrow.net.ElectrumServer;
 import com.sparrowwallet.sparrow.net.ServerType;
 import com.sparrowwallet.sparrow.preferences.PreferenceGroup;
 import com.sparrowwallet.sparrow.preferences.PreferencesDialog;
+import com.sparrowwallet.sparrow.soroban.CounterpartyDialog;
+import com.sparrowwallet.sparrow.soroban.PayNymDialog;
+import com.sparrowwallet.sparrow.soroban.Soroban;
+import com.sparrowwallet.sparrow.soroban.SorobanServices;
 import com.sparrowwallet.sparrow.transaction.TransactionController;
 import com.sparrowwallet.sparrow.transaction.TransactionData;
 import com.sparrowwallet.sparrow.transaction.TransactionView;
@@ -55,10 +61,7 @@ import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.*;
 import javafx.scene.layout.StackPane;
-import javafx.stage.FileChooser;
-import javafx.stage.Stage;
-import javafx.stage.StageStyle;
-import javafx.stage.Window;
+import javafx.stage.*;
 import javafx.util.Duration;
 import org.controlsfx.control.Notifications;
 import org.controlsfx.control.StatusBar;
@@ -91,10 +94,16 @@ public class AppController implements Initializable {
     private MenuItem saveTransaction;
 
     @FXML
+    private MenuItem showTransaction;
+
+    @FXML
     private Menu savePSBT;
 
     @FXML
     private MenuItem savePSBTBinary;
+
+    @FXML
+    private MenuItem showPSBT;
 
     @FXML
     private MenuItem exportWallet;
@@ -137,10 +146,6 @@ public class AppController implements Initializable {
     private static final BooleanProperty showLoadingLogProperty = new SimpleBooleanProperty();
 
     @FXML
-    private CheckMenuItem showUtxosChart;
-    private static final BooleanProperty showUtxosChartProperty = new SimpleBooleanProperty();
-
-    @FXML
     private CheckMenuItem showTxHex;
     private static final BooleanProperty showTxHexProperty = new SimpleBooleanProperty();
 
@@ -155,6 +160,12 @@ public class AppController implements Initializable {
 
     @FXML
     private MenuItem sendToMany;
+
+    @FXML
+    private MenuItem findMixingPartner;
+
+    @FXML
+    private MenuItem showPayNym;
 
     @FXML
     private CheckMenuItem preventSleep;
@@ -175,6 +186,8 @@ public class AppController implements Initializable {
     private PauseTransition wait;
 
     private Timeline statusTimeline;
+
+    private Tab previouslySelectedTab;
 
     private final Set<Wallet> loadingWallets = new LinkedHashSet<>();
 
@@ -220,7 +233,10 @@ public class AppController implements Initializable {
             rootStack.getStyleClass().removeAll(DRAG_OVER_CLASS);
         });
 
-        tabs.getSelectionModel().selectedItemProperty().addListener((observable, old_val, selectedTab) -> {
+        tabs.getSelectionModel().selectedItemProperty().addListener((observable, previouslySelectedTab, selectedTab) -> {
+            if(tabs.getTabs().contains(previouslySelectedTab)) {
+                this.previouslySelectedTab = previouslySelectedTab;
+            }
             tabs.getTabs().forEach(tab -> ((Label)tab.getGraphic()).getGraphic().setOpacity(TAB_LABEL_GRAPHIC_OPACITY_INACTIVE));
             if(selectedTab != null) {
                 Label tabLabel = (Label)selectedTab.getGraphic();
@@ -239,6 +255,10 @@ public class AppController implements Initializable {
         //tabs.setTabDragPolicy(TabPane.TabDragPolicy.REORDER);
         tabs.getTabs().addListener((ListChangeListener<Tab>) c -> {
             if(c.next() && (c.wasAdded() || c.wasRemoved())) {
+                if(c.wasRemoved() && previouslySelectedTab != null) {
+                    tabs.getSelectionModel().select(previouslySelectedTab);
+                }
+
                 boolean walletAdded = c.getAddedSubList().stream().anyMatch(tab -> ((TabData)tab.getUserData()).getType() == TabData.TabType.WALLET);
                 boolean walletRemoved = c.getRemoved().stream().anyMatch(tab -> ((TabData)tab.getUserData()).getType() == TabData.TabType.WALLET);
                 if(walletAdded || walletRemoved) {
@@ -300,18 +320,24 @@ public class AppController implements Initializable {
         showTxHex.selectedProperty().bindBidirectional(showTxHexProperty);
         showLoadingLogProperty.set(Config.get().isShowLoadingLog());
         showLoadingLog.selectedProperty().bindBidirectional(showLoadingLogProperty);
-        showUtxosChartProperty.set(Config.get().isShowUtxosChart());
-        showUtxosChart.selectedProperty().bindBidirectional(showUtxosChartProperty);
         preventSleepProperty.set(Config.get().isPreventSleep());
         preventSleep.selectedProperty().bindBidirectional(preventSleepProperty);
 
         saveTransaction.setDisable(true);
+        showTransaction.visibleProperty().bind(Bindings.and(saveTransaction.visibleProperty(), saveTransaction.disableProperty().not()));
+        showTransaction.disableProperty().bind(saveTransaction.disableProperty());
         savePSBT.visibleProperty().bind(saveTransaction.visibleProperty().not());
         savePSBTBinary.disableProperty().bind(saveTransaction.visibleProperty());
+        showPSBT.visibleProperty().bind(saveTransaction.visibleProperty().not());
         exportWallet.setDisable(true);
         lockWallet.setDisable(true);
         refreshWallet.disableProperty().bind(Bindings.or(exportWallet.disableProperty(), Bindings.or(serverToggle.disableProperty(), AppServices.onlineProperty().not())));
         sendToMany.disableProperty().bind(exportWallet.disableProperty());
+        showPayNym.disableProperty().bind(findMixingPartner.disableProperty());
+        findMixingPartner.setDisable(true);
+        AppServices.onlineProperty().addListener((observable, oldValue, newValue) -> {
+            findMixingPartner.setDisable(exportWallet.isDisable() || getSelectedWalletForm() == null || !SorobanServices.canWalletMix(getSelectedWalletForm().getWallet()) || !newValue);
+        });
 
         setServerType(Config.get().getServerType());
         serverToggle.setSelected(isConnected());
@@ -588,6 +614,23 @@ public class AppController implements Initializable {
         }
     }
 
+    public void showTransaction(ActionEvent event) {
+        Tab selectedTab = tabs.getSelectionModel().getSelectedItem();
+        TabData tabData = (TabData)selectedTab.getUserData();
+        if(tabData.getType() == TabData.TabType.TRANSACTION) {
+            TransactionTabData transactionTabData = (TransactionTabData) tabData;
+            Transaction transaction = transactionTabData.getTransaction();
+
+            try {
+                UR ur = UR.fromBytes(transaction.bitcoinSerialize());
+                QRDisplayDialog qrDisplayDialog = new QRDisplayDialog(ur);
+                qrDisplayDialog.showAndWait();
+            } catch(Exception e) {
+                log.error("Error creating UR", e);
+            }
+        }
+    }
+
     public void savePSBTBinary(ActionEvent event) {
         savePSBT(false, true);
     }
@@ -671,6 +714,18 @@ public class AppController implements Initializable {
         }
     }
 
+    public void showPSBT(ActionEvent event) {
+        Tab selectedTab = tabs.getSelectionModel().getSelectedItem();
+        TabData tabData = (TabData)selectedTab.getUserData();
+        if(tabData.getType() == TabData.TabType.TRANSACTION) {
+            TransactionTabData transactionTabData = (TransactionTabData)tabData;
+
+            CryptoPSBT cryptoPSBT = new CryptoPSBT(transactionTabData.getPsbt().serialize());
+            QRDisplayDialog qrDisplayDialog = new QRDisplayDialog(cryptoPSBT.toUR());
+            qrDisplayDialog.show();
+        }
+    }
+
     public List<WalletTabData> getOpenWalletTabData() {
         List<WalletTabData> openWalletTabData = new ArrayList<>();
 
@@ -744,12 +799,6 @@ public class AppController implements Initializable {
         CheckMenuItem item = (CheckMenuItem)event.getSource();
         Config.get().setShowLoadingLog(item.isSelected());
         EventManager.get().post(new LoadingLogChangedEvent(item.isSelected()));
-    }
-
-    public void showUtxosChart(ActionEvent event) {
-        CheckMenuItem item = (CheckMenuItem)event.getSource();
-        Config.get().setShowUtxosChart(item.isSelected());
-        EventManager.get().post(new UtxosChartChangedEvent(item.isSelected()));
     }
 
     public void showTxHex(ActionEvent event) {
@@ -939,6 +988,12 @@ public class AppController implements Initializable {
                 Whirlpool whirlpool = AppServices.getWhirlpoolServices().getWhirlpool(walletId);
                 whirlpool.setScode(wallet.getMasterMixConfig().getScode());
                 whirlpool.setHDWallet(storage.getWalletId(wallet), copy);
+                Soroban soroban = AppServices.getSorobanServices().getSoroban(walletId);
+                soroban.setHDWallet(copy);
+            } else if(Config.get().isUsePayNym() && SorobanServices.canWalletMix(wallet)) {
+                String walletId = storage.getWalletId(wallet);
+                Soroban soroban = AppServices.getSorobanServices().getSoroban(walletId);
+                soroban.setPaymentCode(copy);
             }
 
             StandardAccount standardAccount = wallet.getStandardAccountType();
@@ -1175,6 +1230,78 @@ public class AppController implements Initializable {
         }
     }
 
+    public void findMixingPartner(ActionEvent event) {
+        WalletForm selectedWalletForm = getSelectedWalletForm();
+        if(selectedWalletForm != null) {
+            Wallet wallet = selectedWalletForm.getWallet();
+            Soroban soroban = AppServices.getSorobanServices().getSoroban(selectedWalletForm.getWalletId());
+            if(soroban.getHdWallet() == null) {
+                if(wallet.isEncrypted()) {
+                    Wallet copy = wallet.copy();
+                    WalletPasswordDialog dlg = new WalletPasswordDialog(copy.getMasterName(), WalletPasswordDialog.PasswordRequirement.LOAD);
+                    Optional<SecureString> password = dlg.showAndWait();
+                    if(password.isPresent()) {
+                        Storage storage = selectedWalletForm.getStorage();
+                        Storage.KeyDerivationService keyDerivationService = new Storage.KeyDerivationService(storage, password.get(), true);
+                        keyDerivationService.setOnSucceeded(workerStateEvent -> {
+                            EventManager.get().post(new StorageEvent(selectedWalletForm.getWalletId(), TimedEvent.Action.END, "Done"));
+                            ECKey encryptionFullKey = keyDerivationService.getValue();
+                            Key key = new Key(encryptionFullKey.getPrivKeyBytes(), storage.getKeyDeriver().getSalt(), EncryptionType.Deriver.ARGON2);
+                            copy.decrypt(key);
+
+                            try {
+                                soroban.setHDWallet(copy);
+                                CounterpartyDialog counterpartyDialog = new CounterpartyDialog(selectedWalletForm.getWalletId(), selectedWalletForm.getWallet());
+                                if(Config.get().isSameAppMixing()) {
+                                    counterpartyDialog.initModality(Modality.NONE);
+                                }
+                                counterpartyDialog.showAndWait();
+                            } finally {
+                                key.clear();
+                                encryptionFullKey.clear();
+                                password.get().clear();
+                            }
+                        });
+                        keyDerivationService.setOnFailed(workerStateEvent -> {
+                            EventManager.get().post(new StorageEvent(selectedWalletForm.getWalletId(), TimedEvent.Action.END, "Failed"));
+                            if(keyDerivationService.getException() instanceof InvalidPasswordException) {
+                                Optional<ButtonType> optResponse = showErrorDialog("Invalid Password", "The wallet password was invalid. Try again?", ButtonType.CANCEL, ButtonType.OK);
+                                if(optResponse.isPresent() && optResponse.get().equals(ButtonType.OK)) {
+                                    Platform.runLater(() -> findMixingPartner(null));
+                                }
+                            } else {
+                                log.error("Error deriving wallet key", keyDerivationService.getException());
+                            }
+                        });
+                        EventManager.get().post(new StorageEvent(selectedWalletForm.getWalletId(), TimedEvent.Action.START, "Decrypting wallet..."));
+                        keyDerivationService.start();
+                    }
+                } else {
+                    soroban.setHDWallet(wallet);
+                    CounterpartyDialog counterpartyDialog = new CounterpartyDialog(selectedWalletForm.getWalletId(), selectedWalletForm.getWallet());
+                    if(Config.get().isSameAppMixing()) {
+                        counterpartyDialog.initModality(Modality.NONE);
+                    }
+                    counterpartyDialog.showAndWait();
+                }
+            } else {
+                CounterpartyDialog counterpartyDialog = new CounterpartyDialog(selectedWalletForm.getWalletId(), selectedWalletForm.getWallet());
+                if(Config.get().isSameAppMixing()) {
+                    counterpartyDialog.initModality(Modality.NONE);
+                }
+                counterpartyDialog.showAndWait();
+            }
+        }
+    }
+
+    public void showPayNym(ActionEvent event) {
+        WalletForm selectedWalletForm = getSelectedWalletForm();
+        if(selectedWalletForm != null) {
+            PayNymDialog payNymDialog = new PayNymDialog(selectedWalletForm.getWalletId(), false);
+            payNymDialog.showAndWait();
+        }
+    }
+
     public void minimizeToTray(ActionEvent event) {
         AppServices.get().minimizeStage((Stage)tabs.getScene().getWindow());
     }
@@ -1183,6 +1310,17 @@ public class AppController implements Initializable {
         WalletForm selectedWalletForm = getSelectedWalletForm();
         if(selectedWalletForm != null) {
             EventManager.get().post(new WalletLockEvent(selectedWalletForm.getMasterWallet()));
+        }
+    }
+
+    public void lockWallets(ActionEvent event) {
+        for(Tab tab : tabs.getTabs()) {
+            TabData tabData = (TabData)tab.getUserData();
+            if(tabData instanceof WalletTabData walletTabData) {
+                if(!walletTabData.getWalletForm().isLocked()) {
+                    EventManager.get().post(new WalletLockEvent(walletTabData.getWalletForm().getMasterWallet()));
+                }
+            }
         }
     }
 
@@ -1334,7 +1472,7 @@ public class AppController implements Initializable {
             TabData tabData = new WalletTabData(TabData.TabType.WALLET, walletForm);
             subTab.setUserData(tabData);
             if(!wallet.isWhirlpoolChildWallet()) {
-                subTab.setContextMenu(getSubTabContextMenu(subTab));
+                subTab.setContextMenu(getSubTabContextMenu(wallet, subTabs, subTab));
             }
 
             subTabs.getTabs().add(subTab);
@@ -1370,12 +1508,14 @@ public class AppController implements Initializable {
 
     public WalletForm getSelectedWalletForm() {
         Tab selectedTab = tabs.getSelectionModel().getSelectedItem();
-        TabData tabData = (TabData)selectedTab.getUserData();
-        if(tabData instanceof WalletTabData) {
-            TabPane subTabs = (TabPane)selectedTab.getContent();
-            Tab selectedSubTab = subTabs.getSelectionModel().getSelectedItem();
-            WalletTabData subWalletTabData = (WalletTabData)selectedSubTab.getUserData();
-            return subWalletTabData.getWalletForm();
+        if(selectedTab != null) {
+            TabData tabData = (TabData)selectedTab.getUserData();
+            if(tabData instanceof WalletTabData) {
+                TabPane subTabs = (TabPane)selectedTab.getContent();
+                Tab selectedSubTab = subTabs.getSelectionModel().getSelectedItem();
+                WalletTabData subWalletTabData = (WalletTabData)selectedSubTab.getUserData();
+                return subWalletTabData.getWalletForm();
+            }
         }
 
         return null;
@@ -1562,7 +1702,7 @@ public class AppController implements Initializable {
         return contextMenu;
     }
 
-    private ContextMenu getSubTabContextMenu(Tab subTab) {
+    private ContextMenu getSubTabContextMenu(Wallet wallet, TabPane subTabs, Tab subTab) {
         ContextMenu contextMenu = new ContextMenu();
         MenuItem rename = new MenuItem("Rename Account");
         rename.setOnAction(event -> {
@@ -1573,14 +1713,27 @@ public class AppController implements Initializable {
                 String label = optLabel.get();
                 subTabLabel.setText(label);
 
-                WalletTabData walletTabData = (WalletTabData)subTab.getUserData();
-                Wallet wallet = walletTabData.getWallet();
                 wallet.setLabel(label);
                 EventManager.get().post(new WalletLabelChangedEvent(wallet));
             }
         });
-
         contextMenu.getItems().add(rename);
+
+        if(!wallet.isMasterWallet() && !wallet.isWhirlpoolChildWallet()) {
+            MenuItem delete = new MenuItem("Delete Account");
+            delete.setOnAction(event -> {
+                Optional<ButtonType> optButtonType = AppServices.showWarningDialog("Delete Wallet Account?", "Labels applied in this wallet account will be lost. Are you sure?", ButtonType.CANCEL, ButtonType.OK);
+                if(optButtonType.isPresent() && optButtonType.get() == ButtonType.OK) {
+                    subTabs.getTabs().remove(subTab);
+                    if(subTabs.getTabs().size() == 1) {
+                        setSubTabsVisible(subTabs, false);
+                    }
+                    EventManager.get().post(new WalletDeletedEvent(wallet));
+                }
+            });
+            contextMenu.getItems().add(delete);
+        }
+
         return contextMenu;
     }
 
@@ -1612,21 +1765,17 @@ public class AppController implements Initializable {
     private void serverToggleStartAnimation() {
         Node thumbArea = serverToggle.lookup(".thumb-area");
         if(thumbArea != null) {
-            FadeTransition fadeTransition = new FadeTransition(Duration.millis(600), thumbArea);
-            fadeTransition.setFromValue(1.0);
-            fadeTransition.setToValue(0.4);
-            fadeTransition.setAutoReverse(true);
-            fadeTransition.setCycleCount(Animation.INDEFINITE);
-            fadeTransition.play();
-            serverToggle.setUserData(fadeTransition);
+            Timeline timeline = AnimationUtil.getPulse(thumbArea, Duration.millis(600), 1.0, 0.4, 8);
+            timeline.play();
+            serverToggle.setUserData(new AnimationUtil.AnimatedNode(thumbArea, timeline));
         }
     }
 
     private void serverToggleStopAnimation() {
         if(serverToggle.getUserData() != null) {
-            FadeTransition fadeTransition = (FadeTransition)serverToggle.getUserData();
-            fadeTransition.stop();
-            fadeTransition.getNode().setOpacity(1.0);
+            AnimationUtil.AnimatedNode animatedNode = (AnimationUtil.AnimatedNode)serverToggle.getUserData();
+            animatedNode.timeline().stop();
+            animatedNode.node().setOpacity(1.0);
             serverToggle.setUserData(null);
         }
     }
@@ -1642,13 +1791,9 @@ public class AppController implements Initializable {
     private void tabLabelStartAnimation(Tab tab) {
         Label tabLabel = (Label) tab.getGraphic();
         if(tabLabel.getUserData() == null) {
-            FadeTransition fadeTransition = new FadeTransition(Duration.millis(1000), tabLabel.getGraphic());
-            fadeTransition.setFromValue(tabLabel.getGraphic().getOpacity());
-            fadeTransition.setToValue(0.1);
-            fadeTransition.setAutoReverse(true);
-            fadeTransition.setCycleCount(Animation.INDEFINITE);
-            fadeTransition.play();
-            tabLabel.setUserData(fadeTransition);
+            Timeline timeline = AnimationUtil.getPulse(tabLabel.getGraphic(), Duration.millis(1000), tabLabel.getGraphic().getOpacity(), 0.1, 8);
+            timeline.play();
+            tabLabel.setUserData(timeline);
         }
     }
 
@@ -1678,8 +1823,8 @@ public class AppController implements Initializable {
     private void tabLabelStopAnimation(Tab tab) {
         Label tabLabel = (Label) tab.getGraphic();
         if(tabLabel.getUserData() != null) {
-            FadeTransition fadeTransition = (FadeTransition)tabLabel.getUserData();
-            fadeTransition.stop();
+            Animation animation = (Animation)tabLabel.getUserData();
+            animation.stop();
             tabLabel.setUserData(null);
             tabLabel.getGraphic().setOpacity(tab.isSelected() ? TAB_LABEL_GRAPHIC_OPACITY_ACTIVE : TAB_LABEL_GRAPHIC_OPACITY_INACTIVE);
         }
@@ -1751,8 +1896,8 @@ public class AppController implements Initializable {
                 lockWallet.setDisable(true);
                 exportWallet.setDisable(true);
                 showLoadingLog.setDisable(true);
-                showUtxosChart.setDisable(true);
                 showTxHex.setDisable(false);
+                findMixingPartner.setDisable(true);
             } else if(event instanceof WalletTabSelectedEvent) {
                 WalletTabSelectedEvent walletTabEvent = (WalletTabSelectedEvent)event;
                 WalletTabData walletTabData = walletTabEvent.getWalletTabData();
@@ -1761,8 +1906,8 @@ public class AppController implements Initializable {
                 lockWallet.setDisable(walletTabData.getWalletForm().lockedProperty().get());
                 exportWallet.setDisable(walletTabData.getWallet() == null || !walletTabData.getWallet().isValid());
                 showLoadingLog.setDisable(false);
-                showUtxosChart.setDisable(false);
                 showTxHex.setDisable(true);
+                findMixingPartner.setDisable(exportWallet.isDisable() || !SorobanServices.canWalletMix(walletTabData.getWallet()) || !AppServices.onlineProperty().get());
             }
         }
     }
@@ -1787,6 +1932,7 @@ public class AppController implements Initializable {
         if(selectedWalletForm != null) {
             if(selectedWalletForm.getWalletId().equals(event.getWalletId())) {
                 exportWallet.setDisable(!event.getWallet().isValid());
+                findMixingPartner.setDisable(exportWallet.isDisable() || !SorobanServices.canWalletMix(event.getWallet()) || !AppServices.onlineProperty().get());
             }
         }
     }
@@ -1809,7 +1955,7 @@ public class AppController implements Initializable {
             }
 
             List<BlockTransaction> blockTransactions = new ArrayList<>(event.getBlockTransactions());
-            List<BlockTransaction> whirlpoolTransactions = event.getWhirlpoolMixTransactions();
+            List<BlockTransaction> whirlpoolTransactions = event.getUnspentConfirmingWhirlpoolMixTransactions();
             blockTransactions.removeAll(whirlpoolTransactions);
 
             if(!whirlpoolTransactions.isEmpty()) {
@@ -1916,8 +2062,15 @@ public class AppController implements Initializable {
             AppServices.get().getApplication().getHostServices().showDocument("https://www.sparrowwallet.com/download");
         });
 
-        if(statusBar.getRightItems().size() > 0 && statusBar.getRightItems().get(0) instanceof Hyperlink) {
-            statusBar.getRightItems().remove(0);
+        Hyperlink existingUpdateLabel = null;
+        for(Node node : statusBar.getRightItems()) {
+            if(node instanceof Hyperlink) {
+                existingUpdateLabel = (Hyperlink)node;
+            }
+        }
+
+        if(existingUpdateLabel != null) {
+            statusBar.getRightItems().remove(existingUpdateLabel);
         }
 
         statusBar.getRightItems().add(0, versionUpdateLabel);

@@ -1,11 +1,11 @@
 plugins {
     id 'application'
+    id 'org.openjfx.javafxplugin' version '0.0.10'
     id 'extra-java-module-info'
-    id 'com.dua3.javafxgradle7plugin' version '0.0.9'
     id 'org.beryx.jlink' version '2.24.0'
 }
 
-def sparrowVersion = '1.5.2'
+def sparrowVersion = '1.5.5'
 def os = org.gradle.internal.os.OperatingSystem.current()
 def osName = os.getFamilyName()
 if(os.macOsX) {
@@ -29,7 +29,7 @@ tasks.withType(AbstractArchiveTask) {
 }
 
 javafx {
-    version = "16"
+    version = "17"
     modules = [ 'javafx.controls', 'javafx.fxml', 'javafx.swing', 'javafx.graphics' ]
 }
 
@@ -45,13 +45,13 @@ dependencies {
     }
     implementation('com.google.guava:guava:28.2-jre')
     implementation('com.google.code.gson:gson:2.8.6')
-    implementation('com.h2database:h2:1.4.201-SNAPSHOT')
+    implementation('com.h2database:h2:2.0.202')
     implementation('com.zaxxer:HikariCP:4.0.3')
     implementation('org.jdbi:jdbi3-core:3.20.0') {
         exclude group: 'org.slf4j'
     }
     implementation('org.jdbi:jdbi3-sqlobject:3.20.0')
-    implementation('org.flywaydb:flyway-core:7.10.5-SNAPSHOT')
+    implementation('org.flywaydb:flyway-core:7.10.6-SNAPSHOT')
     implementation('org.fxmisc.richtext:richtextfx:0.10.4')
     implementation('no.tornado:tornadofx-controls:1.0.4')
     implementation('com.google.zxing:javase:3.4.0') {
@@ -65,7 +65,8 @@ dependencies {
     implementation('com.github.arteam:simple-json-rpc-server:1.0') {
         exclude group: 'org.slf4j'
     }
-    implementation('com.sparrowwallet:hummingbird:1.6.2')
+    implementation('com.sparrowwallet:hummingbird:1.6.4')
+    implementation('co.nstant.in:cbor:0.9')
     implementation('com.nativelibs4java:bridj:0.7-20140918-3') {
         exclude group: 'com.google.android.tools', module: 'dx'
     }
@@ -91,7 +92,11 @@ dependencies {
     implementation('org.slf4j:jul-to-slf4j:1.7.30') {
         exclude group: 'org.slf4j'
     }
-    implementation('com.sparrowwallet.nightjar:nightjar:0.2.19')
+    implementation('com.sparrowwallet.nightjar:nightjar:0.2.25')
+    implementation('io.reactivex.rxjava2:rxjava:2.2.15')
+    implementation('io.reactivex.rxjava2:rxjavafx:2.2.2')
+    implementation('org.apache.commons:commons-lang3:3.7')
+    implementation('net.sourceforge.streamsupport:streamsupport:1.7.0')
     testImplementation('junit:junit:4.12')
 }
 
@@ -191,7 +196,8 @@ jlink {
                    "--add-reads=com.sparrowwallet.merged.module=logback.classic",
                    "--add-reads=com.sparrowwallet.merged.module=com.fasterxml.jackson.databind",
                    "--add-reads=com.sparrowwallet.merged.module=com.fasterxml.jackson.annotation",
-                   "--add-reads=com.sparrowwallet.merged.module=com.fasterxml.jackson.core"]
+                   "--add-reads=com.sparrowwallet.merged.module=com.fasterxml.jackson.core",
+                   "--add-reads=com.sparrowwallet.merged.module=co.nstant.in.cbor"]
 
         if(os.macOsX) {
             jvmArgs += ["-Dprism.lcdtext=false", "--add-opens=javafx.graphics/com.sun.glass.ui.mac=com.sparrowwallet.merged.module"]
@@ -206,12 +212,12 @@ jlink {
         imageOptions = []
         installerOptions = ['--file-associations', 'src/main/deploy/psbt.properties', '--file-associations', 'src/main/deploy/txn.properties', '--file-associations', 'src/main/deploy/bitcoin.properties', '--file-associations', 'src/main/deploy/aopp.properties', '--license-file', 'LICENSE']
         if(os.windows) {
-            installerOptions += ['--win-per-user-install', '--win-dir-chooser', '--win-menu', '--win-shortcut', '--resource-dir', 'src/main/deploy/package/windows/']
+            installerOptions += ['--win-per-user-install', '--win-dir-chooser', '--win-menu', '--win-menu-group', 'Sparrow', '--win-shortcut', '--resource-dir', 'src/main/deploy/package/windows/']
             imageOptions += ['--icon', 'src/main/deploy/package/windows/sparrow.ico']
             installerType = "exe"
         }
         if(os.linux) {
-            installerOptions += ['--resource-dir', 'src/main/deploy/package/linux/', '--linux-shortcut', '--linux-rpm-license-type', 'ASL 2.0']
+            installerOptions += ['--resource-dir', 'src/main/deploy/package/linux/', '--linux-shortcut', '--linux-menu-group', 'Sparrow', '--linux-rpm-license-type', 'ASL 2.0']
             imageOptions += ['--icon', 'src/main/deploy/package/linux/Sparrow.png', '--resource-dir', 'src/main/deploy/package/linux/']
         }
         if(os.macOsX) {
@@ -354,7 +360,7 @@ extraJavaModuleInfo {
     module('json-simple-1.1.1.jar', 'json.simple', '1.1.1') {
         exports('org.json.simple')
     }
-    module('logback-classic-1.2.3.jar', 'logback.classic', '1.2.3') {
+    module('logback-classic-1.2.8.jar', 'logback.classic', '1.2.8') {
         exports('ch.qos.logback.classic')
         requires('org.slf4j')
         requires('logback.core')
@@ -431,6 +437,11 @@ extraJavaModuleInfo {
         requires('javafx.graphics')
         requires('javafx.controls')
     }
+    module('rxjavafx-2.2.2.jar', 'io.reactivex.rxjava2fx', '2.2.2') {
+        exports('io.reactivex.rxjavafx.schedulers')
+        requires('io.reactivex.rxjava2')
+        requires('javafx.graphics')
+    }
     module('wellbehavedfx-0.3.3.jar', 'org.fxmisc.wellbehaved', '0.3.3') {
         requires('javafx.base')
         requires('javafx.graphics')
@@ -441,7 +452,7 @@ extraJavaModuleInfo {
     module('kotlin-stdlib-1.5.20.jar', 'kotlin.stdlib', '1.5.20') {
         exports('kotlin')
     }
-    module('hummingbird-1.6.2.jar', 'com.sparrowwallet.hummingbird', '1.6.2') {
+    module('hummingbird-1.6.3.jar', 'com.sparrowwallet.hummingbird', '1.6.3') {
         exports('com.sparrowwallet.hummingbird')
         exports('com.sparrowwallet.hummingbird.registry')
         requires('co.nstant.in.cbor')
@@ -449,7 +460,7 @@ extraJavaModuleInfo {
     module('cbor-0.9.jar', 'co.nstant.in.cbor', '0.9') {
         exports('co.nstant.in.cbor')
     }
-    module('nightjar-0.2.19.jar', 'com.sparrowwallet.nightjar', '0.2.19') {
+    module('nightjar-0.2.25.jar', 'com.sparrowwallet.nightjar', '0.2.25') {
         requires('com.google.common')
         requires('net.sourceforge.streamsupport')
         requires('org.slf4j')
@@ -459,6 +470,7 @@ extraJavaModuleInfo {
         requires('com.fasterxml.jackson.core')
         requires('logback.classic')
         requires('org.json')
+        requires('io.reactivex.rxjava2')
         exports('com.samourai.http.client')
         exports('com.samourai.tor.client')
         exports('com.samourai.wallet.api.backend')
@@ -466,6 +478,17 @@ extraJavaModuleInfo {
         exports('com.samourai.wallet.client.indexHandler')
         exports('com.samourai.wallet.hd')
         exports('com.samourai.wallet.util')
+        exports('com.samourai.wallet.bip47.rpc')
+        exports('com.samourai.wallet.bip47.rpc.java')
+        exports('com.samourai.wallet.cahoots')
+        exports('com.samourai.wallet.cahoots.psbt')
+        exports('com.samourai.wallet.cahoots.stonewallx2')
+        exports('com.samourai.soroban.cahoots')
+        exports('com.samourai.soroban.client')
+        exports('com.samourai.soroban.client.cahoots')
+        exports('com.samourai.soroban.client.meeting')
+        exports('com.samourai.soroban.client.rpc')
+        exports('com.samourai.wallet.send')
         exports('com.samourai.whirlpool.client.event')
         exports('com.samourai.whirlpool.client.wallet')
         exports('com.samourai.whirlpool.client.wallet.beans')
@@ -549,7 +572,7 @@ extraJavaModuleInfo {
         requires('org.slf4j')
     }
     module('jnacl-1.0.0.jar', 'eu.neilalexander.jnacl', '1.0.0')
-    module('logback-core-1.2.3.jar', 'logback.core', '1.2.3') {
+    module('logback-core-1.2.8.jar', 'logback.core', '1.2.8') {
         requires('java.xml')
     }
     module('kotlin-stdlib-common-1.5.20.jar', 'org.jetbrains.kotlin.kotlin.stdlib.common', '1.5.20') {

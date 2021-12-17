@@ -15,9 +15,12 @@ import javafx.concurrent.Task;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.scene.image.Image;
 
+import java.awt.*;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public class WebcamService extends ScheduledService<Image> {
@@ -89,16 +92,20 @@ public class WebcamService extends ScheduledService<Image> {
                         opening.set(false);
                     }
 
-                    BufferedImage bimg = cam.getImage();
-                    if(bimg == null) {
+                    BufferedImage originalImage = cam.getImage();
+                    if(originalImage == null) {
                         return null;
                     }
 
-                    Image image = SwingFXUtils.toFXImage(bimg, null);
+                    CroppedDimension cropped = getCroppedDimension(originalImage);
+                    BufferedImage croppedImage = originalImage.getSubimage(cropped.x, cropped.y, cropped.length, cropped.length);
+                    BufferedImage framedImage = getFramedImage(originalImage, cropped);
+
+                    Image image = SwingFXUtils.toFXImage(framedImage, null);
                     updateValue(image);
 
                     if(System.currentTimeMillis() > (lastQrSampleTime + QR_SAMPLE_PERIOD_MILLIS)) {
-                        readQR(bimg);
+                        readQR(originalImage, croppedImage);
                         lastQrSampleTime = System.currentTimeMillis();
                     }
 
@@ -125,16 +132,47 @@ public class WebcamService extends ScheduledService<Image> {
         return super.cancel();
     }
 
-    private void readQR(BufferedImage bufferedImage) {
+    private void readQR(BufferedImage wideImage, BufferedImage croppedImage) {
+        Result result = readQR(wideImage);
+        if(result == null) {
+            result = readQR(croppedImage);
+        }
+
+        if(result != null) {
+            resultProperty.set(result);
+        }
+    }
+
+    private Result readQR(BufferedImage bufferedImage) {
         LuminanceSource source = new BufferedImageLuminanceSource(bufferedImage);
         BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(source));
 
         try {
-            Result result = qrReader.decode(bitmap);
-            resultProperty.set(result);
+            return qrReader.decode(bitmap, Map.of(DecodeHintType.TRY_HARDER, Boolean.TRUE));
         } catch(ReaderException e) {
             // fall thru, it means there is no QR code in image
+            return null;
         }
+    }
+
+    private BufferedImage getFramedImage(BufferedImage image, CroppedDimension cropped) {
+        BufferedImage clone = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = (Graphics2D)clone.getGraphics();
+        g2d.drawImage(image, 0, 0, null);
+        float[] dash1 = {10.0f};
+        g2d.setColor(Color.BLACK);
+        g2d.setStroke(new BasicStroke(resolution == WebcamResolution.HD ? 3.0f : 1.5f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f, dash1, 0.0f));
+        g2d.draw(new RoundRectangle2D.Double(cropped.x, cropped.y, cropped.length, cropped.length, 10, 10));
+        g2d.dispose();
+        return clone;
+    }
+
+    private CroppedDimension getCroppedDimension(BufferedImage bufferedImage) {
+        int dimension = Math.min(bufferedImage.getWidth(), bufferedImage.getHeight());
+        int squareSize = dimension / 2;
+        int x = (bufferedImage.getWidth() - squareSize) / 2;
+        int y = (bufferedImage.getHeight() - squareSize) / 2;
+        return new CroppedDimension(x, y, squareSize);
     }
 
     public Result getResult() {
@@ -171,5 +209,17 @@ public class WebcamService extends ScheduledService<Image> {
 
     public BooleanProperty openingProperty() {
         return opening;
+    }
+
+    private static class CroppedDimension {
+        public int x;
+        public int y;
+        public int length;
+
+        public CroppedDimension(int x, int y, int length) {
+            this.x = x;
+            this.y = y;
+            this.length = length;
+        }
     }
 }
